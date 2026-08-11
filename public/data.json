@@ -1,0 +1,9 @@
+{
+  "books": [
+    {
+      "key": "grade6",
+      "title": "六年级英语上册",
+      "bookPath": "https://english-reader-app.oss-ap-southeast-1.aliyuncs.com/grade6"
+    }
+  ]
+}
