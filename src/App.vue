@@ -186,7 +186,7 @@ const loadBooks = async () => {
 // ========== 加载课本配置 ==========
 const loadBookConfig = async (bookPath) => {
   try {
-    const response = await fetch(`${bookPath}/book.json`)
+    const response = await fetch(`${bookPath}/book.json?t=${Date.now()}`)
     const data = await response.json()
     units.value = data.units.map((unit) => ({
       ...unit,
