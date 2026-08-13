@@ -64,6 +64,26 @@
 
           <!-- 控制面板 -->
           <section class="control-panel">
+            <!-- 自由模式控制区 -->
+            <div class="free-mode-controls" style="display: flex; align-items: center; gap: 12px; padding: 6px 10px; flex-wrap: wrap; border-top: 1px solid var(--border); margin-top: 4px;">
+              <label style="display: flex; align-items: center; gap: 6px; font-size: 14px; cursor: pointer;">
+                <input type="checkbox" v-model="freeModeEnabled" @change="onFreeModeToggle" />
+                自由模式
+              </label>
+              <template v-if="freeModeEnabled">
+                <label style="display: flex; align-items: center; gap: 6px; font-size: 14px;">
+                  重复：
+                  <input type="number" v-model.number="repeatCount" min="1" max="10" style="width: 50px; padding: 4px 6px; border-radius: 8px; border: 1px solid var(--border); background: var(--paper-2); text-align: center;" />
+                  遍
+                </label>
+                <button @click="startFreeMode" class="nav-btn" style="background: var(--accent-1); color: #fff; border: none; padding: 0 16px; height: 34px; border-radius: 12px; cursor: pointer;">
+                  ▶ 开始练习
+                </button>
+                <button v-if="freeModeActive" @click="stopFreeMode" class="nav-btn" style="background: var(--ink-2); color: #fff; border: none; padding: 0 16px; height: 34px; border-radius: 12px; cursor: pointer;">
+                  ⏹ 停止
+                </button>
+              </template>
+            </div>
             <div class="navigation-buttons">
               <button id="prevUnitBtn" class="nav-btn prev-btn" title="上一课" @click="prevLyric" :disabled="currentLyricIndex <= 0">
                 <svg width="16" height="16" viewBox="0 0 20 20" fill="none">
@@ -122,16 +142,36 @@
           <!-- 歌词显示 -->
           <section class="lyrics-container">
             <div id="lyricsDisplay" class="lyrics-display">
-              <div
-                v-for="(lyric, index) in lyrics"
-                :key="index"
-                class="lyric-line"
-                :class="{ active: index === currentLyricIndex }"
-                @click="playLyric(index)"
-              >
-                <div class="lyric-text">{{ lyric.english }}</div>
-                <div class="lyric-translation" v-if="lyric.chinese">{{ lyric.chinese }}</div>
-              </div>
+              <!-- 普通模式：显示所有歌词 -->
+              <template v-if="!freeModeActive">
+                <div
+                  v-for="(lyric, index) in lyrics"
+                  :key="index"
+                  class="lyric-line"
+                  :class="{ active: index === currentLyricIndex }"
+                  @click="playLyric(index)"
+                >
+                  <div class="lyric-text">{{ lyric.english }}</div>
+                  <div class="lyric-translation" v-if="lyric.chinese">{{ lyric.chinese }}</div>
+                </div>
+              </template>
+
+              <!-- 自由模式：只显示当前单词 -->
+              <template v-else>
+                <div class="lyric-line active" style="font-size: clamp(24px, 6vw, 40px); padding: 30px 20px; text-align: center; border: 2px solid var(--accent-1); border-radius: 16px;">
+                  <div class="lyric-text" style="font-weight: 700;">
+                    {{ lyrics[freeModeCurrentIndex]?.english || '加载中...' }}
+                  </div>
+                  <div class="lyric-translation" v-if="lyrics[freeModeCurrentIndex]?.chinese" style="font-size: 18px; margin-top: 12px;">
+                    {{ lyrics[freeModeCurrentIndex]?.chinese }}
+                  </div>
+                  <div style="margin-top: 20px; font-size: 16px; color: var(--ink-2);">
+                    第 {{ freeModeCurrentIndex + 1 }} / {{ totalWords }} 个单词
+                    （重复 {{ currentRepeat + 1 }} / {{ repeatCount }} 遍）
+                  </div>
+                </div>
+              </template>
+
               <p class="placeholder" v-if="!lyrics.length">选择一个Unit开始学习...</p>
             </div>
           </section>
@@ -142,7 +182,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { usePlayer } from './composables/usePlayer'
 
 const books = ref([])
@@ -154,6 +194,7 @@ const {
   isPlaying,
   lyrics,
   currentLyricIndex,
+  currentTime,        // ← 自由模式监听需要
   formattedCurrentTime,
   formattedDuration,
   progressPercent,
@@ -167,6 +208,15 @@ const {
   nextLyric,
   seekTo,
 } = usePlayer()
+
+// ========== 自由模式状态 ==========
+const freeModeEnabled = ref(false)    // 是否启用自由模式
+const freeModeActive = ref(false)     // 是否正在练习中
+const repeatCount = ref(3)            // 默认重复 3 遍
+const currentRepeat = ref(0)          // 当前单词已重复次数
+const totalWords = ref(0)             // 当前单元总单词数
+const freeModeCurrentIndex = ref(0)   // 当前练习的单词索引
+const freeModeSeeking = ref(false)    // 防重入标志：seekTo 后短暂屏蔽 watch
 
 // ========== 加载课本列表 ==========
 const loadBooks = async () => {
@@ -208,7 +258,114 @@ const loadUnitByIndex = async (index) => {
   currentUnitIndex.value = index
   const unit = units.value[index]
   await loadUnit(unit.audioUrl, unit.lrcUrl)
+  // 加载单元时，如果自由模式激活，自动退出
+  if (freeModeActive.value) {
+    freeModeActive.value = false
+    currentRepeat.value = 0
+    freeModeCurrentIndex.value = 0
+    freeModeSeeking.value = false
+  }
 }
+
+// ========== 切换自由模式 ==========
+const onFreeModeToggle = () => {
+  if (!freeModeEnabled.value && freeModeActive.value) {
+    // 取消勾选时，如果正在练习，停止
+    stopFreeMode()
+  }
+}
+
+// ========== 开始自由模式 ==========
+const startFreeMode = () => {
+  if (!units.value.length || currentUnitIndex.value < 0) {
+    alert('请先选择一个单元')
+    return
+  }
+  // 确保歌词已加载
+  if (!lyrics.value.length) {
+    alert('当前单元没有歌词数据')
+    return
+  }
+
+  freeModeActive.value = true
+  freeModeCurrentIndex.value = 0
+  currentRepeat.value = 0
+  totalWords.value = lyrics.value.length
+
+  // 从第一个单词开始播放
+  playLyric(0)
+}
+
+// ========== 停止自由模式 ==========
+const stopFreeMode = () => {
+  freeModeActive.value = false
+  // 暂停播放
+  if (isPlaying.value) {
+    togglePlay()
+  }
+  // 重置到开头
+  seekTo(0)
+  currentLyricIndex.value = -1
+  currentRepeat.value = 0
+  freeModeCurrentIndex.value = 0
+  freeModeSeeking.value = false
+}
+
+// ========== 监听播放进度（自由模式专用）==========
+// 当自由模式激活时，检测当前单词是否播放完毕，控制重复或跳下一个单词
+// 注意：必须使用 freeModeCurrentIndex 作为真相源，不能用 currentLyricIndex
+// 因为 seekTo 只更新 audio.currentTime 和 currentTime，不会同步 currentLyricIndex，
+// 会导致 watch 再次触发时索引还是旧值，造成"跳转后被拉回"的死循环
+watch(currentTime, (newTime) => {
+  // 只有自由模式激活时才处理
+  if (!freeModeActive.value || !lyrics.value.length) return
+  // 防重入：seekTo 跳转后短暂屏蔽，避免 currentTime 变化立即触发误判
+  if (freeModeSeeking.value) return
+
+  // 用自由模式自维护的索引作为真相源
+  const currentIdx = freeModeCurrentIndex.value
+  if (currentIdx < 0 || currentIdx >= lyrics.value.length) return
+
+  // 获取当前单词的结束时间（下一个单词的开始时间，或音频总时长）
+  const currentLyric = lyrics.value[currentIdx]
+  const nextLyric = lyrics.value[currentIdx + 1]
+  const endTime = nextLyric ? nextLyric.time : duration.value
+
+  // 如果当前播放时间 >= 结束时间 - 0.1秒（容差），说明这个单词已经播完了
+  if (newTime >= endTime - 0.1) {
+    // 增加重复计数
+    currentRepeat.value += 1
+
+    // 进入跳转处理，设置防重入标志
+    freeModeSeeking.value = true
+
+    if (currentRepeat.value < repeatCount.value) {
+      // 还没达到重复次数，跳回当前单词开头继续播放
+      seekTo(currentLyric.time)
+    } else {
+      // 已达到重复次数，准备播放下一个单词
+      const nextIndex = currentIdx + 1
+      if (nextIndex < lyrics.value.length) {
+        // 重置重复计数，跳到下一个单词
+        currentRepeat.value = 0
+        // 更新自由模式当前索引
+        freeModeCurrentIndex.value = nextIndex
+        playLyric(nextIndex)
+      } else {
+        // 所有单词都练习完了
+        freeModeActive.value = false
+        freeModeSeeking.value = false
+        alert('🎉 练习完成！共 ' + totalWords.value + ' 个单词，每个重复 ' + repeatCount.value + ' 遍。')
+        return
+      }
+    }
+
+    // 延迟释放防重入标志，等音频 timeupdate 稳定到新位置后再放行
+    setTimeout(() => {
+      freeModeSeeking.value = false
+    }, 200)
+  }
+})
 
 // ========== 课本切换 ==========
 const onBookChange = async () => {
