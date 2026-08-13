@@ -1,38 +1,127 @@
-# english-reader
+# 英语点读学习应用
 
-This template should help get you started developing with Vue 3 in Vite.
+## 项目简介
 
-## Recommended IDE Setup
+英语点读学习应用是一个基于 **Vue 3** 构建的交互式英语学习工具，专为小学生英语学习场景设计。应用提供**单词点读**、**课文跟读**、**字幕同步**、**循环播放**、**主题切换**等核心功能，帮助学习者在听读结合中提升英语语感和发音能力。
 
-[VS Code](https://code.visualstudio.com/) + [Vue (Official)](https://marketplace.visualstudio.com/items?itemName=Vue.volar) (and disable Vetur).
+项目为纯静态单页应用，数据资源（音频、字幕、配置）托管于云存储服务，实现**轻量化部署**与**跨平台访问**。目前已部署至 GitHub Pages，支持 PC、平板、手机等多端自适应访问。
 
-## Recommended Browser Setup
+---
 
-- Chromium-based browsers (Chrome, Edge, Brave, etc.):
-  - [Vue.js devtools](https://chromewebstore.google.com/detail/vuejs-devtools/nhdogjmejiglipccpnnnanhbledajbpd)
-  - [Turn on Custom Object Formatter in Chrome DevTools](http://bit.ly/object-formatters)
-- Firefox:
-  - [Vue.js devtools](https://addons.mozilla.org/en-US/firefox/addon/vue-js-devtools/)
-  - [Turn on Custom Object Formatter in Firefox DevTools](https://fxdx.dev/firefox-devtools-custom-object-formatters/)
+## 核心功能
 
-## Customize configuration
+### 课本与单元管理
+- 支持多本教材切换（当前为 **六年级英语上册**）
+- 每个单元拆分为 **单词学习** 与 **课文学习** 两个独立模块
+- 单元列表支持快速跳转，记忆学习进度
 
-See [Vite Configuration Reference](https://vite.dev/config/).
+### 智能点读播放
+- **逐句高亮**：播放时同步高亮当前朗读句子
+- **点击跳转**：点击任意句子即可从该处开始播放
+- **上一句/下一句**：快捷导航，方便反复练习
+- **播放进度条**：可视化进度显示，支持拖拽跳转
 
-## Project Setup
+### 灵活播放模式
+- **播放速度调节**：0.5x 至 2.0x 多档调速，适应不同学习节奏
+- **循环播放模式**：
+  - **列表循环**：整课循环播放
+  - **单句循环**：当前句子反复播放，适合精听
+  - **点句点读**：点击句子播放一次后自动暂停
+- **翻译显示模式**：支持双语、仅英文、仅中文、模糊四种模式
 
-```sh
+### 视觉与体验
+- **深色/浅色主题**：一键切换，保护视力
+- **响应式设计**：自适应桌面、平板、手机屏幕
+- **平滑动画**：歌词滚动、高亮切换、主题过渡顺滑
+
+---
+
+## 技术架构
+
+| 层级 | 技术选型 | 说明 |
+| :--- | :--- | :--- |
+| **前端框架** | Vue 3 (Composition API) | 响应式数据驱动，组件化开发 |
+| **构建工具** | Vite | 极速冷启动，高效热更新 |
+| **部署平台** | GitHub Pages | 免费静态托管，自动 CI/CD |
+| **数据存储** | 阿里云 OSS | 存储音频 (.mp3)、字幕 (.lrc)、配置 (.json) |
+| **核心引擎** | 原生 Web Audio API | 无需第三方库，轻量高效 |
+
+### 代码结构
+```
+src/
+├── assets/
+│   └── style.css              # 全局样式（含响应式、主题变量）
+├── components/
+│   └── App.vue                # 主应用组件（播放器UI、控制逻辑）
+├── composables/
+│   └── usePlayer.js           # 播放器组合式函数（状态管理、音频控制）
+├── utils/
+│   ├── LRCParser.js           # LRC 歌词解析器（支持中英双语）
+│   └── helpers.js             # 通用工具函数（时间格式化、节流等）
+└── main.js                    # 应用入口
+```
+
+### 数据流示意
+```
+GitHub Pages (前端) ←→ 阿里云 OSS (数据层)
+                              ├── data.json       (课本列表)
+                              ├── grade6/
+                              │   ├── book.json   (单元配置)
+                              │   ├── unitX_words.lrc (单词字幕)
+                              │   ├── unitX_text.lrc  (课文字幕)
+                              │   ├── unitX_words.mp3 (单词音频)
+                              │   └── unitX_text.mp3  (课文音频)
+```
+
+---
+
+## 资源文件规范
+
+### 字幕文件 (.lrc) 格式
+```lrc
+[00:05.23]Hello, how are you? | 你好，你好吗？
+[00:08.10]I am fine, thank you. | 我很好，谢谢你。
+```
+- 时间戳格式：`[分钟:秒.毫秒]`
+- 分隔符：英文与中文使用竖线 `|` 分隔
+
+### 配置文件 (book.json) 格式
+```json
+{
+  "bookCover": "cover.jpg",
+  "units": [
+    { "title": "Unit 1 - 单词", "filename": "unit1_words" },
+    { "title": "Unit 1 - 课文", "filename": "unit1_text" }
+  ]
+}
+```
+
+---
+
+## 部署与访问
+
+### 线上地址
+- **主站**：https://yyx-cat.github.io/English-reading-html/
+
+### 本地开发
+```bash
+# 安装依赖
 npm install
-```
 
-### Compile and Hot-Reload for Development
-
-```sh
+# 启动开发服务器
 npm run dev
-```
 
-### Compile and Minify for Production
-
-```sh
+# 构建生产版本
 npm run build
 ```
+
+## 多端适配
+
+| 设备 | 布局策略 |
+| :--- | :--- |
+| **桌面端** | 左右两栏：左侧课程列表 + 右侧播放器 |
+| **平板** | 两栏布局，课程列表宽度自适应收缩 |
+| **手机** | 单栏布局：课程列表隐藏，播放器占满屏幕 |
+
+## 许可证
+本项目基于原作者 [iChochy/NCE](https://github.com/iChochy/NCE) 项目二次开发。
