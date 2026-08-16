@@ -1466,8 +1466,21 @@ body::-webkit-scrollbar-thumb:hover,
   }
 
   .lyric-line {
-    padding: 4px 8px;
+    padding: 8px 10px;
     border-radius: 10px;
+    /* 移动端触屏友好：保证点击区域至少 44px 高度 */
+    min-height: 44px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* 点读/点击时的视觉反馈（触感反馈） */
+  .lyric-line:active {
+    background: rgba(59, 130, 246, 0.14);
+    border-color: var(--blue-accent);
+    transform: scale(0.99);
   }
 
   .lyric-text {
@@ -1477,6 +1490,91 @@ body::-webkit-scrollbar-thumb:hover,
   .lyric-translation {
     font-size: 12px;
   }
+}
+
+/* ========== 点读模式按钮 ========== */
+.point-read-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 36px;
+  padding: 0 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--paper-3);
+  color: var(--ink-2);
+  font-size: 12px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  transition: transform 0.2s ease, background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+  flex-shrink: 0;
+}
+
+.point-read-btn:hover {
+  background: var(--accent-3);
+  border-color: var(--accent-1);
+  color: var(--ink-1);
+  transform: translateY(-1px);
+}
+
+.point-read-btn:active {
+  transform: scale(0.98);
+}
+
+/* 点读模式激活：蓝色高亮，区别于循环模式的红色 */
+.point-read-btn.active {
+  background: var(--blue-accent);
+  border-color: var(--blue-accent);
+  color: #ffffff;
+  box-shadow: 0 8px 16px rgba(59, 130, 246, 0.35);
+}
+
+.point-read-btn.active:hover {
+  background: var(--blue-accent);
+  border-color: var(--blue-accent);
+  color: #ffffff;
+  transform: translateY(-1px);
+}
+
+/* ========== Toast 轻提示 ========== */
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(24px + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  z-index: 1000;
+  max-width: min(90vw, 420px);
+  padding: 12px 20px;
+  border-radius: 14px;
+  background: rgba(20, 20, 20, 0.92);
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.5;
+  text-align: center;
+  box-shadow: var(--shadow-md);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  pointer-events: none;
+}
+
+body.dark-theme .toast {
+  background: rgba(247, 244, 240, 0.95);
+  color: var(--ink-1);
+}
+
+/* Toast 淡入淡出过渡 */
+.toast-fade-enter-active,
+.toast-fade-leave-active {
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+
+.toast-fade-enter-from,
+.toast-fade-leave-to {
+  opacity: 0;
+  transform: translateX(-50%) translateY(12px);
 }
 
 @media (prefers-reduced-motion: reduce) {

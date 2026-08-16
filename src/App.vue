@@ -85,7 +85,7 @@
               </template>
             </div>
             <div class="navigation-buttons">
-              <button id="prevUnitBtn" class="nav-btn prev-btn" title="上一课" @click="prevLyric" :disabled="currentLyricIndex <= 0">
+              <button id="prevUnitBtn" class="nav-btn prev-btn" title="上一课" @click="onPrevLyric" :disabled="(pointReadMode ? pointReadTargetIndex : currentLyricIndex) <= 0">
                 <svg width="16" height="16" viewBox="0 0 20 20" fill="none">
                   <path d="M12 16L7 11L12 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
                 </svg>
@@ -98,7 +98,7 @@
                   <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" />
                 </svg>
               </button>
-              <button id="nextUnitBtn" class="nav-btn next-btn" title="下一课" @click="nextLyric" :disabled="currentLyricIndex >= lyrics.length - 1">
+              <button id="nextUnitBtn" class="nav-btn next-btn" title="下一课" @click="onNextLyric" :disabled="(pointReadMode ? pointReadTargetIndex : currentLyricIndex) >= lyrics.length - 1">
                 <svg width="16" height="16" viewBox="0 0 20 20" fill="none">
                   <path d="M8 4L13 9L8 14" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
                 </svg>
@@ -121,6 +121,7 @@
                   <text x="10" y="12.2" text-anchor="middle" font-size="9" font-weight="800" fill="currentColor" stroke="none">1</text>
                 </svg>
               </button>
+              <button id="pointReadBtn" class="point-read-btn" :class="{ active: pointReadMode }" @click="togglePointRead" :title="pointReadMode ? '点读模式已开启' : '开启点读模式'">点读</button>
               <button id="toggleTranslationBtn" class="toggle-translation-btn" @click="toggleTranslation">中</button>
             </div>
 
@@ -140,7 +141,7 @@
           </section>
 
           <!-- 歌词显示 -->
-          <section class="lyrics-container">
+          <section class="lyrics-container" ref="lyricsContainerRef">
             <div id="lyricsDisplay" class="lyrics-display">
               <!-- 普通模式：显示所有歌词 -->
               <template v-if="!freeModeActive">
@@ -148,8 +149,8 @@
                   v-for="(lyric, index) in lyrics"
                   :key="index"
                   class="lyric-line"
-                  :class="{ active: index === currentLyricIndex }"
-                  @click="playLyric(index)"
+                  :class="{ active: index === (pointReadMode ? pointReadTargetIndex : currentLyricIndex) }"
+                  @click="onLyricClick(index)"
                 >
                   <div class="lyric-text">{{ lyric.english }}</div>
                   <div class="lyric-translation" v-if="lyric.chinese">{{ lyric.chinese }}</div>
@@ -178,17 +179,26 @@
         </main>
       </div>
     </div>
+
+    <!-- 轻提示 Toast（点读模式首次开启等引导） -->
+    <transition name="toast-fade">
+      <div v-if="toastVisible" class="toast">{{ toastMessage }}</div>
+    </transition>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, watch } from 'vue'
+import { ref, onMounted, watch, computed } from 'vue'
 import { usePlayer } from './composables/usePlayer'
+import { useAutoScroll } from './composables/useAutoScroll'
 
 const books = ref([])
 const units = ref([])
 const selectedBookKey = ref('')
 const currentUnitIndex = ref(0)
+
+// 歌词滚动容器引用（用于自动滚动）
+const lyricsContainerRef = ref(null)
 
 const {
   isPlaying,
@@ -204,8 +214,6 @@ const {
   togglePlay,
   playLyric,
   cycleSpeed,
-  prevLyric,
-  nextLyric,
   seekTo,
 } = usePlayer()
 
@@ -217,6 +225,111 @@ const currentRepeat = ref(0)          // 当前单词已重复次数
 const totalWords = ref(0)             // 当前单元总单词数
 const freeModeCurrentIndex = ref(0)   // 当前练习的单词索引
 const freeModeSeeking = ref(false)    // 防重入标志：seekTo 后短暂屏蔽 watch
+
+// ========== 点读模式状态 ==========
+const pointReadMode = ref(false)      // 是否处于点读模式（默认连续播放模式）
+const pointReadTargetIndex = ref(-1)  // 点读模式当前目标句索引（作为暂停检测真相源，避免 seekTo 竞态）
+const pointReadPausing = ref(false)   // 防重入标志：句末暂停时短暂屏蔽 watch
+
+// ========== Toast 轻提示 ==========
+const toastVisible = ref(false)       // Toast 是否可见
+const toastMessage = ref('')          // Toast 文本内容
+let toastTimer = null                 // Toast 自动隐藏计时器
+
+/**
+ * 显示一个轻提示 Toast（若干秒后自动消失）
+ * @param {string} msg - 提示文本
+ * @param {number} [duration=2500] - 显示时长（毫秒）
+ * @returns {void}
+ */
+const showToast = (msg, duration = 2500) => {
+  toastMessage.value = msg
+  toastVisible.value = true
+  if (toastTimer) clearTimeout(toastTimer)
+  toastTimer = setTimeout(() => {
+    toastVisible.value = false
+  }, duration)
+}
+
+/**
+ * 切换点读模式 / 连续播放模式
+ * - 连续→点读：保持播放，同步目标句为当前句，后续播完自动暂停
+ * - 点读→连续：不自动播放，等待用户操作
+ * - 首次开启点读模式时弹出引导提示
+ * @returns {void}
+ */
+const togglePointRead = () => {
+  pointReadMode.value = !pointReadMode.value
+
+  if (pointReadMode.value) {
+    // 开启点读模式：同步当前目标句为正在高亮的句子
+    if (currentLyricIndex.value >= 0) {
+      pointReadTargetIndex.value = currentLyricIndex.value
+    }
+    // 首次使用引导（用 localStorage 记忆是否已提示过）
+    if (!localStorage.getItem('pointReadGuided')) {
+      showToast('点读模式已开启，点击句子播放，播完自动暂停')
+      localStorage.setItem('pointReadGuided', '1')
+    }
+  } else {
+    // 关闭点读模式：重置防重入标志，不主动播放
+    pointReadPausing.value = false
+    pointReadTargetIndex.value = -1
+  }
+}
+
+// ========== 歌词自动滚动 ==========
+// 自由模式时禁用自动滚动（自由模式只显示一个单词，无需滚动）
+const autoScrollEnabled = computed(() => !freeModeActive.value)
+// 滚动跟随的“目标索引”：
+// - 点读模式：跟随用户点击的 pointReadTargetIndex（稳定，不被 timeupdate 句末误报带偏）
+// - 连续模式：跟随播放进度 currentLyricIndex
+const autoScrollActiveIndex = computed(() =>
+  pointReadMode.value ? pointReadTargetIndex.value : currentLyricIndex.value
+)
+// 接入自动滚动：监听目标索引变化，把当前句滚到第二行位置
+const { forceScrollToIndex, reset: resetAutoScroll } = useAutoScroll(
+  lyricsContainerRef,
+  autoScrollActiveIndex,
+  lyrics,
+  { enabledRef: autoScrollEnabled, idleTimeout: 3000 }
+)
+
+// ========== 点击歌词跳转播放 ==========
+// 点击任意句 → 立即同步高亮 + 跳转播放 + 立即滚动到该句
+// 点读模式下额外记录为目标句（播完自动暂停）；点击同一句 → seekTo 句首重播
+// @param {number} index - 被点击的歌词索引
+const onLyricClick = (index) => {
+  // 立即同步高亮索引，避免等待 timeupdate（约 250ms）造成的高亮延迟
+  currentLyricIndex.value = index
+  playLyric(index)
+  // 点读模式下记录目标句，作为句末暂停检测与滚动跟随的真相源
+  if (pointReadMode.value) {
+    pointReadTargetIndex.value = index
+    // 清除可能残留的暂停防重入标志
+    pointReadPausing.value = false
+  }
+  // 用户主动点击，立即强制滚动到点击句（避免依赖异步更新的索引造成跳转延迟）
+  forceScrollToIndex(index)
+}
+
+// ========== 上一句 / 下一句按钮（点读模式下也同步目标句）==========
+// 点读模式下以 pointReadTargetIndex 为基准计算，避免 currentLyricIndex 未及时更新导致跳错
+// @returns {void}
+const onPrevLyric = () => {
+  const base = pointReadMode.value ? pointReadTargetIndex.value : currentLyricIndex.value
+  const prev = base - 1
+  if (prev < 0) return
+  onLyricClick(prev)
+}
+
+// @returns {void}
+const onNextLyric = () => {
+  const base = pointReadMode.value ? pointReadTargetIndex.value : currentLyricIndex.value
+  const next = base + 1
+  if (next >= lyrics.value.length) return
+  onLyricClick(next)
+}
 
 // ========== 加载课本列表 ==========
 const loadBooks = async () => {
@@ -265,6 +378,11 @@ const loadUnitByIndex = async (index) => {
     freeModeCurrentIndex.value = 0
     freeModeSeeking.value = false
   }
+  // 点读模式：保留模式开关，但重置目标句索引（新单元 currentLyricIndex 已被置 -1）
+  pointReadTargetIndex.value = -1
+  pointReadPausing.value = false
+  // 切换单元时重置滚动状态（滚回顶部、清除空闲计时）
+  resetAutoScroll()
 }
 
 // ========== 切换自由模式 ==========
@@ -309,6 +427,8 @@ const stopFreeMode = () => {
   currentRepeat.value = 0
   freeModeCurrentIndex.value = 0
   freeModeSeeking.value = false
+  // 退出自由模式后恢复自动滚动状态（清除用户交互暂停）
+  resetAutoScroll()
 }
 
 // ========== 监听播放进度（自由模式专用）==========
@@ -363,6 +483,42 @@ watch(currentTime, (newTime) => {
     // 延迟释放防重入标志，等音频 timeupdate 稳定到新位置后再放行
     setTimeout(() => {
       freeModeSeeking.value = false
+    }, 200)
+  }
+})
+
+// ========== 点读模式：句末自动暂停 ==========
+// 当点读模式开启时，检测当前目标句是否播放完毕，完毕则自动暂停（不播下一句）
+// 注意：必须使用 pointReadTargetIndex 作为真相源，不能用 currentLyricIndex
+// 因为 seekTo 只更新 audio.currentTime 和 currentTime，不会同步 currentLyricIndex，
+// 会导致 watch 再次触发时索引还是旧值，造成误判
+watch(currentTime, (newTime) => {
+  // 非点读模式、已暂停、防重入中，均不处理
+  if (!pointReadMode.value) return
+  if (!isPlaying.value) return
+  if (pointReadPausing.value) return
+  if (pointReadTargetIndex.value < 0) return
+  if (!lyrics.value.length) return
+
+  const targetIdx = pointReadTargetIndex.value
+  if (targetIdx >= lyrics.value.length) return
+
+  // 目标句的结束时间 = 下一句的开始时间，或音频总时长
+  const nextLyric = lyrics.value[targetIdx + 1]
+  const endTime = nextLyric ? nextLyric.time : duration.value
+
+  // 当前时间 >= 结束时间 - 0.1秒（容差），说明目标句已播完
+  if (newTime >= endTime - 0.1) {
+    // 设置防重入标志，避免暂停瞬间 timeupdate 再次触发导致误播放
+    pointReadPausing.value = true
+    // 暂停播放（点读模式核心：播完一句自动停）
+    if (isPlaying.value) {
+      togglePlay()
+    }
+    // 点读模式高亮由 pointReadTargetIndex 决定（模板中已处理），无需重置 currentLyricIndex
+    // 短暂延迟后释放标志
+    setTimeout(() => {
+      pointReadPausing.value = false
     }, 200)
   }
 })
